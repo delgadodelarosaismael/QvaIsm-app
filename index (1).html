@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>QvaPay P2P</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: #0f172a; --card: #1e293b; --border: #334155;
+    --text: #e2e8f0; --muted: #94a3b8; --accent: #0ea5e9;
+    --green: #22c55e; --red: #ef4444; --yellow: #eab308;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text); padding: 16px; padding-bottom: 90px; min-height: 100vh;
+  }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+  .tabs {
+    position: fixed; bottom: 0; left: 0; right: 0; display: flex; background: var(--card);
+    border-top: 1px solid var(--border); padding: 8px; gap: 6px; z-index: 10;
+  }
+  .tab { flex: 1; text-align: center; padding: 10px 4px; border-radius: 8px; color: var(--muted); font-size: 12px; cursor: pointer; background: transparent; border: none; }
+  .tab.active { background: var(--accent); color: white; }
+  .screen { display: none; }
+  .screen.active { display: block; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-bottom: 10px; }
+  .card .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .badge { padding: 3px 9px; border-radius: 999px; font-size: 10px; font-weight: 700; text-transform: uppercase; }
+  .badge.open { background: #064e3b; color: #6ee7b7; }
+  .badge.processing, .badge.revision, .badge.paid { background: #78350f; color: #fcd34d; }
+  .badge.completed { background: #1e3a8a; color: #93c5fd; }
+  .badge.cancelled { background: #450a0a; color: #fca5a5; }
+  .chip { display: inline-block; font-size: 10px; background: #0f172a; border: 1px solid var(--border); padding: 2px 7px; border-radius: 6px; margin: 2px 3px 0 0; color: var(--muted); }
+  .row { display: flex; justify-content: space-between; font-size: 13px; margin: 3px 0; color: var(--muted); }
+  .row b { color: var(--text); }
+  button.action { width: 100%; padding: 10px; border-radius: 8px; border: none; background: var(--accent); color: white; font-weight: 600; font-size: 14px; margin-top: 8px; cursor: pointer; }
+  button.action.danger { background: var(--red); }
+  button.action.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  input, select { width: 100%; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; margin-bottom: 10px; }
+  label { font-size: 11px; color: var(--muted); text-transform: uppercase; display: block; margin-bottom: 4px; }
+  .empty { text-align: center; color: var(--muted); padding: 30px 10px; font-size: 13px; }
+  .toast { position: fixed; top: 16px; left: 16px; right: 16px; background: var(--card); border: 1px solid var(--accent); padding: 12px; border-radius: 10px; font-size: 13px; display: none; z-index: 50; }
+  .toast.err { border-color: var(--red); }
+  .toast.ok { border-color: var(--green); }
+  .spinner { text-align: center; padding: 20px; color: var(--muted); font-size: 13px; }
+  a.link { color: var(--accent); }
+  .filtros { display: flex; gap: 8px; }
+  .filtros input { flex: 1; }
+  .lock { text-align: center; padding: 60px 20px; }
+  .lock .ico { font-size: 48px; margin-bottom: 16px; }
+</style>
+</head>
+<body>
+
+<div class="toast" id="toast"></div>
+
+<div id="screen-lock" class="screen">
+  <div class="lock">
+    <div class="ico">🔒</div>
+    <h1>Acceso restringido</h1>
+    <p class="sub">Esta app solo funciona abierta desde tu bot de Telegram.</p>
+  </div>
+</div>
+
+<div id="screen-config" class="screen">
+  <h1>🔑 Configura tu token</h1>
+  <p class="sub">Tu token de QvaPay. Se guarda solo en este dispositivo.</p>
+  <div class="card">
+    <label>Token de API</label>
+    <input type="text" id="input-token" placeholder="600689|xxxxxxxxxxxxxxxxx" />
+    <button class="action" onclick="guardarToken()">Guardar y continuar</button>
+  </div>
+</div>
+
+<div id="screen-main" class="screen">
+  <h1>📋 Mis ofertas</h1>
+  <p class="sub" id="resumen-ofertas"></p>
+  <div id="lista-ofertas"></div>
+  <button class="action ghost" onclick="cargarMisOfertas()">↻ Actualizar</button>
+</div>
+
+<div id="screen-mercado" class="screen">
+  <h1>🔎 Mercado</h1>
+  <div class="card">
+    <label>Moneda</label>
+    <input type="text" id="m-coin" value="BANK_CUP" />
+    <div class="filtros">
+      <div style="flex:1;">
+        <label>Ratio mín.</label>
+        <input type="number" id="m-min" placeholder="200" />
+      </div>
+      <div style="flex:1;">
+        <label>Ratio máx.</label>
+        <input type="number" id="m-max" placeholder="1000" />
+      </div>
+    </div>
+    <button class="action ghost" onclick="cargarMercado()">🔎 Buscar</button>
+  </div>
+  <div id="lista-mercado"></div>
+</div>
+
+<div id="screen-crear" class="screen">
+  <h1>➕ Nueva oferta</h1>
+  <div class="card">
+    <label>Tipo</label>
+    <select id="c-tipo">
+      <option value="buy">Comprar (buy)</option>
+      <option value="sell">Vender (sell)</option>
+    </select>
+    <label>Moneda</label>
+    <input type="text" id="c-coin" value="BANK_CUP" />
+    <label>Monto (QUSD)</label>
+    <input type="number" id="c-amount" placeholder="50" />
+    <label>Recibes</label>
+    <input type="number" id="c-receive" placeholder="12500" />
+    <label>Cuenta (detalle de pago)</label>
+    <input type="text" id="c-cuenta" placeholder="Número de cuenta" />
+    <label>Mensaje (máx. 79)</label>
+    <input type="text" id="c-mensaje" maxlength="79" placeholder="Pago rápido" />
+    <label><input type="checkbox" id="c-privada" style="width:auto;margin-right:6px;" />Privada</label>
+    <label><input type="checkbox" id="c-vip" style="width:auto;margin-right:6px;" />Solo VIP</label>
+    <button class="action" onclick="crearOferta()">Crear oferta</button>
+  </div>
+</div>
+
+<div id="screen-ajustes" class="screen">
+  <h1>⚙️ Ajustes</h1>
+  <div class="card">
+    <label>Token actual</label>
+    <input type="text" id="ajustes-token-actual" disabled />
+    <button class="action danger" onclick="borrarToken()">Borrar token de este dispositivo</button>
+  </div>
+</div>
+
+<div class="tabs" id="tabs" style="display:none;">
+  <button class="tab" data-screen="main" onclick="irA('main')">📋 Mías</button>
+  <button class="tab" data-screen="mercado" onclick="irA('mercado')">🔎 Mercado</button>
+  <button class="tab" data-screen="crear" onclick="irA('crear')">➕ Crear</button>
+  <button class="tab" data-screen="ajustes" onclick="irA('ajustes')">⚙️ Ajustes</button>
+</div>
+
+<script>
+const tg = window.Telegram && window.Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+
+// Cambia esto por la URL real de tu Worker de Cloudflare
+const API = "https://TU-WORKER.workers.dev";
+
+function getToken() { return localStorage.getItem("qvapay_token") || ""; }
+function setToken(t) { localStorage.setItem("qvapay_token", t); }
+function clearToken() { localStorage.removeItem("qvapay_token"); }
+
+function toast(msg, tipo) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.className = "toast " + (tipo || "");
+  el.style.display = "block";
+  setTimeout(() => { el.style.display = "none"; }, 3500);
+}
+
+async function qvapay(path, options) {
+  const token = getToken();
+  const headers = Object.assign({
+    "Authorization": "Bearer " + token,
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "X-Telegram-Init-Data": (tg && tg.initData) || "",
+  }, (options && options.headers) || {});
+
+  const res = await fetch(API + path, Object.assign({}, options || {}, { headers }));
+  const data = await res.json().catch(() => ({}));
+
+  if (res.status === 403 && data && data.error === "Acceso denegado") {
+    const err = new Error("Acceso denegado — esta app no es tuya");
+    err.status = 403;
+    throw err;
+  }
+  if (!res.ok) {
+    const err = new Error((data && data.message) || ("HTTP " + res.status));
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+function irA(nombre) {
+  document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+  document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+  document.getElementById("screen-" + nombre).classList.add("active");
+  const tab = document.querySelector('.tab[data-screen="' + nombre + '"]');
+  if (tab) tab.classList.add("active");
+  if (nombre === "main") cargarMisOfertas();
+  if (nombre === "mercado") cargarMercado();
+  if (nombre === "ajustes") document.getElementById("ajustes-token-actual").value = getToken();
+}
+
+function guardarToken() {
+  const t = document.getElementById("input-token").value.trim();
+  if (!t) { toast("Pega tu token primero", "err"); return; }
+  setToken(t);
+  document.getElementById("tabs").style.display = "flex";
+  irA("main");
+}
+
+function borrarToken() {
+  clearToken();
+  document.getElementById("tabs").style.display = "none";
+  document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+  document.getElementById("screen-config").classList.add("active");
+  toast("Token borrado", "ok");
+}
+
+function badgeClase(estado) {
+  if (estado === "open") return "open";
+  if (["processing", "revision", "paid"].includes(estado)) return estado;
+  if (estado === "completed") return "completed";
+  if (estado === "cancelled") return "cancelled";
+  return "";
+}
+
+function infoVendedor(usuario) {
+  if (!usuario) return "";
+  const partes = [`@${usuario.username || "N/A"}`];
+  if (usuario.rating_avg != null && usuario.rating_count) {
+    partes.push(`⭐ ${Number(usuario.rating_avg).toFixed(2)} (${usuario.rating_count})`);
+  }
+  if (usuario._count && usuario._count.P2P != null) partes.push(`✅ ${usuario._count.P2P} ops`);
+  if (usuario.kyc) partes.push("🪪 KYC");
+  if (usuario.vip) partes.push("💎 VIP");
+  return partes.map(p => `<span class="chip">${p}</span>`).join("");
+}
+
+async function cargarMisOfertas() {
+  const cont = document.getElementById("lista-ofertas");
+  cont.innerHTML = '<div class="spinner">Cargando...</div>';
+  try {
+    const datos = await qvapay("/p2p?my=true&take=100");
+    const ofertas = (datos && datos.data) || [];
+    document.getElementById("resumen-ofertas").textContent = ofertas.length + " oferta(s)";
+    if (ofertas.length === 0) {
+      cont.innerHTML = '<div class="empty">No tienes ofertas todavía.</div>';
+      return;
+    }
+    cont.innerHTML = ofertas.map(o => {
+      const peerHtml = o.Peer ? `<div class="row"><span>Peer</span>${infoVendedor(o.Peer)}</div>` : "";
+      const extras = [];
+      if (o.private) extras.push('<span class="chip">🔒 Privada</span>');
+      if (o.only_vip) extras.push('<span class="chip">💎 Solo VIP</span>');
+      return `
+      <div class="card">
+        <div class="top">
+          <strong>${o.type === "buy" ? "▼ Compra" : "▲ Venta"} ${o.coin || ""}</strong>
+          <span class="badge ${badgeClase(o.status)}">${o.status}</span>
+        </div>
+        <div class="row"><span>Monto</span><b>${o.amount}</b></div>
+        <div class="row"><span>Recibe</span><b>${o.receive}</b></div>
+        ${peerHtml}
+        <div>${extras.join("")}</div>
+        <a class="link" href="https://www.qvapay.com/p2p/${o.uuid}" target="_blank" style="font-size:12px;display:block;margin-top:8px;">Gestionar oferta →</a>
+      </div>`;
+    }).join("");
+  } catch (e) {
+    cont.innerHTML = '<div class="empty">Error: ' + e.message + '</div>';
+    toast(e.message, "err");
+  }
+}
+
+async function cargarMercado() {
+  const cont = document.getElementById("lista-mercado");
+  const coin = document.getElementById("m-coin").value.trim() || "BANK_CUP";
+  const min = document.getElementById("m-min").value;
+  const max = document.getElementById("m-max").value;
+  cont.innerHTML = '<div class="spinner">Cargando...</div>';
+  try {
+    let path = `/p2p?take=15&type=sell&coin=${encodeURIComponent(coin)}&orderBy=best_rate&orderType=desc`;
+    if (min) path += `&ratio_min=${min}`;
+    if (max) path += `&ratio_max=${max}`;
+    const datos = await qvapay(path);
+    const ofertas = (datos && datos.data) || [];
+    if (ofertas.length === 0) {
+      cont.innerHTML = '<div class="empty">No hay ofertas disponibles ahora.</div>';
+      return;
+    }
+    cont.innerHTML = ofertas.map(o => {
+      const ratio = (parseFloat(o.receive) / parseFloat(o.amount)) || 0;
+      return `
+      <div class="card">
+        <div class="top">
+          <span class="badge open">${ratio.toFixed(2)}</span>
+        </div>
+        <div>${infoVendedor(o.User)}</div>
+        <div class="row" style="margin-top:8px;"><span>Monto</span><b>${o.amount} QUSD</b></div>
+        <div class="row"><span>Recibes</span><b>${o.receive} ${o.coin}</b></div>
+        <button class="action" onclick="aplicarOferta('${o.uuid}', this)">Aplicar</button>
+      </div>`;
+    }).join("");
+  } catch (e) {
+    cont.innerHTML = '<div class="empty">Error: ' + e.message + '</div>';
+    toast(e.message, "err");
+  }
+}
+
+async function aplicarOferta(uuid, btn) {
+  btn.disabled = true;
+  btn.textContent = "Aplicando...";
+  try {
+    await qvapay("/p2p/" + uuid + "/apply", { method: "POST" });
+    toast("¡Oferta tomada!", "ok");
+    if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
+    cargarMercado();
+  } catch (e) {
+    toast("No se pudo aplicar: " + e.message, "err");
+    btn.disabled = false;
+    btn.textContent = "Aplicar";
+  }
+}
+
+async function crearOferta() {
+  const body = {
+    type: document.getElementById("c-tipo").value,
+    coin: document.getElementById("c-coin").value.trim(),
+    amount: parseFloat(document.getElementById("c-amount").value),
+    receive: parseFloat(document.getElementById("c-receive").value),
+    details: [{ name: "cuenta", value: document.getElementById("c-cuenta").value.trim() || "-" }],
+    private: document.getElementById("c-privada").checked ? 1 : 0,
+    only_vip: document.getElementById("c-vip").checked ? 1 : 0,
+    message: document.getElementById("c-mensaje").value.trim(),
+  };
+  if (!body.amount || !body.receive) { toast("Completa monto y recibe", "err"); return; }
+  try {
+    await qvapay("/p2p/create", { method: "POST", body: JSON.stringify(body) });
+    toast("¡Oferta creada!", "ok");
+    irA("main");
+  } catch (e) {
+    toast("Error creando oferta: " + e.message, "err");
+  }
+}
+
+(function init() {
+  if (!tg || !tg.initData) {
+    document.getElementById("screen-lock").classList.add("active");
+    return;
+  }
+  const token = getToken();
+  if (token) {
+    document.getElementById("tabs").style.display = "flex";
+    irA("main");
+  } else {
+    document.getElementById("screen-config").classList.add("active");
+  }
+})();
+</script>
+</body>
+</html>
