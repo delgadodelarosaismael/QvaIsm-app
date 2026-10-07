@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>QvaPay P2P</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: #0f172a; --card: #1e293b; --border: #334155;
+    --text: #e2e8f0; --muted: #94a3b8; --accent: #0ea5e9;
+    --green: #22c55e; --red: #ef4444; --yellow: #eab308;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text); padding: 16px; padding-bottom: 90px; min-height: 100vh;
+  }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  h2 { font-size: 14px; margin: 16px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+  .tabs { position: fixed; bottom: 0; left: 0; right: 0; display: flex; background: var(--card); border-top: 1px solid var(--border); padding: 8px; gap: 4px; z-index: 10; }
+  .tab { flex: 1; text-align: center; padding: 10px 2px; border-radius: 8px; color: var(--muted); font-size: 11px; cursor: pointer; background: transparent; border: none; }
+  .tab.active { background: var(--accent); color: white; }
+  .screen { display: none; }
+  .screen.active { display: block; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-bottom: 10px; }
+  .card .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; gap: 8px; }
+  .badge { padding: 3px 9px; border-radius: 999px; font-size: 10px; font-weight: 700; text-transform: uppercase; white-space: nowrap; }
+  .badge.open { background: #064e3b; color: #6ee7b7; }
+  .badge.processing, .badge.revision, .badge.paid { background: #78350f; color: #fcd34d; }
+  .badge.completed { background: #1e3a8a; color: #93c5fd; }
+  .badge.cancelled, .badge.missing { background: #450a0a; color: #fca5a5; }
+  .badge.paused { background: #374151; color: #d1d5db; }
+  .chip { display: inline-block; font-size: 10px; background: #0f172a; border: 1px solid var(--border); padding: 2px 7px; border-radius: 6px; margin: 2px 3px 0 0; color: var(--muted); }
+  .row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; margin: 3px 0; color: var(--muted); gap: 8px; }
+  .row b { color: var(--text); text-align: right; word-break: break-word; }
+  button.action { width: 100%; padding: 10px; border-radius: 8px; border: none; background: var(--accent); color: white; font-weight: 600; font-size: 14px; margin-top: 8px; cursor: pointer; }
+  button.action.danger { background: var(--red); }
+  button.action.green { background: #16a34a; }
+  button.action.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  .btns { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .btns button { flex: 1; min-width: 70px; padding: 8px 4px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--text); font-size: 12px; cursor: pointer; }
+  input, select { width: 100%; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px; margin-bottom: 10px; }
+  label { font-size: 11px; color: var(--muted); text-transform: uppercase; display: block; margin-bottom: 4px; }
+  .empty { text-align: center; color: var(--muted); padding: 24px 10px; font-size: 13px; }
+  .toast { position: fixed; top: 16px; left: 16px; right: 16px; background: var(--card); border: 1px solid var(--accent); padding: 12px; border-radius: 10px; font-size: 13px; display: none; z-index: 50; }
+  .toast.err { border-color: var(--red); }
+  .toast.ok { border-color: var(--green); }
+  .spinner { text-align: center; padding: 20px; color: var(--muted); font-size: 13px; }
+  a.link { color: var(--accent); }
+  .filtros { display: flex; gap: 8px; }
+  .lock { text-align: center; padding: 60px 20px; }
+  .lock .ico { font-size: 48px; margin-bottom: 16px; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--red); margin-right: 6px; }
+  .dot.on { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .note { font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.4; }
+  .log { background: #020617; border: 1px solid var(--border); border-radius: 10px; padding: 10px; height: 130px; overflow-y: auto; font-family: monospace; font-size: 11px; line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<div class="toast" id="toast"></div>
+
+<div id="screen-lock" class="screen">
+  <div class="lock">
+    <div class="ico">🔒</div>
+    <h1>Acceso restringido</h1>
+    <p class="sub">Esta app solo funciona abierta desde tu bot de Telegram.</p>
+  </div>
+</div>
+
+<div id="screen-config" class="screen">
+  <h1>🔑 Configura tu token</h1>
+  <p class="sub">Tu token de QvaPay. Se guarda solo en este dispositivo.</p>
+  <div class="card">
+    <label>Token de API</label>
+    <input type="text" id="input-token" placeholder="600689|xxxxxxxxxxxxxxxxx" />
+    <button class="action" onclick="guardarToken()">Guardar y continuar</button>
+  </div>
+</div>
+
+<!-- PANEL -->
+<div id="screen-panel" class="screen">
+  <h1>📊 Panel</h1>
+  <p class="sub">Ofertas que reactivo automáticamente</p>
+
+  <div class="card">
+    <div class="row"><span><span class="dot" id="dot-ciclo"></span><span id="txt-ciclo">Ciclo detenido</span></span><b id="txt-ultimo"></b></div>
+    <button class="action" id="btn-ciclo" onclick="toggleCiclo()">▶ Iniciar ciclo</button>
+    <p class="note">⚠️ Este ciclo solo corre mientras la Mini App esté abierta. Si también tienes el ciclo del bot activo, detén uno de los dos para no duplicar ediciones.</p>
+  </div>
+
+  <h2>Ofertas seguidas</h2>
+  <div id="lista-seguidas"></div>
+
+  <div class="card">
+    <label>Agregar por UUID</label>
+    <input type="text" id="nuevo-uuid" placeholder="uuid de la oferta" />
+    <button class="action ghost" onclick="agregarUuid()">＋ Agregar</button>
+    <p class="note">También puedes tocar "Seguir" en cualquier oferta de la pestaña Mías.</p>
+  </div>
+
+  <h2>Mensaje general</h2>
+  <div class="card">
+    <input type="text" id="msg-general" maxlength="79" placeholder="Mensaje para todas las ofertas seguidas" />
+    <button class="action ghost" onclick="aplicarMensajeGeneral()">Aplicar a todas</button>
+  </div>
+
+  <h2>Actividad</h2>
+  <div class="log" id="log"></div>
+</div>
+
+<!-- MÍAS -->
+<div id="screen-main" class="screen">
+  <h1>📋 Mis ofertas</h1>
+  <p class="sub" id="resumen-ofertas"></p>
+  <div id="lista-ofertas"></div>
+  <button class="action ghost" onclick="cargarMisOfertas()">↻ Actualizar</button>
+</div>
+
+<!-- MERCADO -->
+<div id="screen-mercado" class="screen">
+  <h1>🔎 Mercado</h1>
+  <div class="card">
+    <label>Moneda</label>
+    <input type="text" id="m-coin" value="BANK_CUP" />
+    <div class="filtros">
+      <div style="flex:1;"><label>Ratio mín.</label><input type="number" id="m-min" placeholder="200" /></div>
+      <div style="flex:1;"><label>Ratio máx.</label><input type="number" id="m-max" placeholder="1000" /></div>
+    </div>
+    <button class="action ghost" onclick="cargarMercado()">🔎 Buscar</button>
+  </div>
+  <div id="lista-mercado"></div>
+</div>
+
+<!-- CREAR -->
+<div id="screen-crear" class="screen">
+  <h1>➕ Nueva oferta</h1>
+  <div class="card">
+    <label>Tipo</label>
+    <select id="c-tipo"><option value="buy">Comprar (buy)</option><option value="sell">Vender (sell)</option></select>
+    <label>Moneda</label>
+    <input type="text" id="c-coin" value="BANK_CUP" />
+    <label>Monto (QUSD)</label>
+    <input type="number" id="c-amount" placeholder="50" />
+    <label>Recibes</label>
+    <input type="number" id="c-receive" placeholder="12500" />
+    <label>Cuenta (detalle de pago)</label>
+    <input type="text" id="c-cuenta" placeholder="Número de cuenta" />
+    <label>Mensaje (máx. 79)</label>
+    <input type="text" id="c-mensaje" maxlength="79" placeholder="Pago rápido" />
+    <label><input type="checkbox" id="c-privada" style="width:auto;margin-right:6px;" />Privada</label>
+    <label><input type="checkbox" id="c-vip" style="width:auto;margin-right:6px;" />Solo VIP</label>
+    <button class="action" onclick="crearOferta()">Crear oferta</button>
+  </div>
+</div>
+
+<!-- AJUSTES -->
+<div id="screen-ajustes" class="screen">
+  <h1>⚙️ Ajustes</h1>
+  <div class="card">
+    <label>Saludo automático al peer (vacío = desactivado)</label>
+    <input type="text" id="aj-saludo" placeholder="Hola 👋 en un momento te atiendo" />
+    <div class="filtros">
+      <div style="flex:1;"><label>Ciclo cada (seg)</label><input type="number" id="aj-intervalo" /></div>
+      <div style="flex:1;"><label>Pausa entre ediciones (seg)</label><input type="number" id="aj-pausa" /></div>
+    </div>
+    <button class="action" onclick="guardarAjustes()">Guardar ajustes</button>
+  </div>
+  <div class="card">
+    <label>Token actual</label>
+    <input type="text" id="aj-token" disabled />
+    <button class="action danger" onclick="borrarToken()">Borrar token de este dispositivo</button>
+  </div>
+</div>
+
+<div class="tabs" id="tabs" style="display:none;">
+  <button class="tab" data-screen="panel" onclick="irA('panel')">📊 Panel</button>
+  <button class="tab" data-screen="main" onclick="irA('main')">📋 Mías</button>
+  <button class="tab" data-screen="mercado" onclick="irA('mercado')">🔎 Mercado</button>
+  <button class="tab" data-screen="crear" onclick="irA('crear')">➕ Crear</button>
+  <button class="tab" data-screen="ajustes" onclick="irA('ajustes')">⚙️</button>
+</div>
+
+<script>
+const tg = window.Telegram && window.Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+
+// Pon aquí la URL de tu Worker de Cloudflare (la misma que ya tenías)
+const API = "https://TU-WORKER.workers.dev";
+
+/* ---------- utilidades ---------- */
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function getToken() { return localStorage.getItem("qvapay_token") || ""; }
+function setToken(t) { localStorage.setItem("qvapay_token", t); }
+function clearToken() { localStorage.removeItem("qvapay_token"); }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function toast(msg, tipo) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.className = "toast " + (tipo || "");
+  el.style.display = "block";
+  setTimeout(() => { el.style.display = "none"; }, 3500);
+}
+
+function log(msg) {
+  const el = document.getElementById("log");
+  const hora = new Date().toLocaleTimeString("es-ES", { hour12: false });
+  el.innerHTML += `<div>[${hora}] ${esc(msg)}</div>`;
+  el.scrollTop = el.scrollHeight;
+}
+
+/* ---------- configuración local ---------- */
+function cargarCfg() {
+  let c = {};
+  try { c = JSON.parse(localStorage.getItem("qv_cfg") || "{}"); } catch (e) { c = {}; }
+  return Object.assign({ ofertas: [], mensajeGeneral: "", saludo: "", intervalo: 100, pausa: 15 }, c);
+}
+let cfg = cargarCfg();
+function guardarCfg() { localStorage.setItem("qv_cfg", JSON.stringify(cfg)); }
+let cacheOfertas = {}; // uuid -> oferta, de la última consulta
+
+/* ---------- API ---------- */
+async function qvapay(path, options) {
+  const headers = Object.assign({
+    "Authorization": "Bearer " + getToken(),
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "X-Telegram-Init-Data": (tg && tg.initData) || "",
+  }, (options && options.headers) || {});
+  const res = await fetch(API + path, Object.assign({}, options || {}, { headers }));
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 403 && data && data.error === "Acceso denegado") {
+    const err = new Error("Acceso denegado — esta app no es tuya");
+    err.status = 403;
+    throw err;
+  }
+  if (!res.ok) {
+    const err = new Error((data && data.message) || ("HTTP " + res.status));
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+/* ---------- navegación ---------- */
+function irA(nombre) {
+  document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+  document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+  document.getElementById("screen-" + nombre).classList.add("active");
+  const tab = document.querySelector('.tab[data-screen="' + nombre + '"]');
+  if (tab) tab.classList.add("active");
+  if (nombre === "panel") { renderSeguidas(); document.getElementById("msg-general").value = cfg.mensajeGeneral || ""; }
+  if (nombre === "main") cargarMisOfertas();
+  if (nombre === "mercado") cargarMercado();
+  if (nombre === "ajustes") {
+    document.getElementById("aj-token").value = getToken();
+    document.getElementById("aj-saludo").value = cfg.saludo || "";
+    document.getElementById("aj-intervalo").value = cfg.intervalo;
+    document.getElementById("aj-pausa").value = cfg.pausa;
+  }
+}
+
+function guardarToken() {
+  const t = document.getElementById("input-token").value.trim();
+  if (!t) { toast("Pega tu token primero", "err"); return; }
+  setToken(t);
+  document.getElementById("tabs").style.display = "flex";
+  irA("panel");
+}
+function borrarToken() {
+  detenerCiclo();
+  clearToken();
+  document.getElementById("tabs").style.display = "none";
+  document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+  document.getElementById("screen-config").classList.add("active");
+  toast("Token borrado", "ok");
+}
+function guardarAjustes() {
+  cfg.saludo = document.getElementById("aj-saludo").value.trim();
+  cfg.intervalo = Math.max(30, parseInt(document.getElementById("aj-intervalo").value, 10) || 100);
+  cfg.pausa = Math.max(5, parseInt(document.getElementById("aj-pausa").value, 10) || 15);
+  guardarCfg();
+  toast("Ajustes guardados", "ok");
+}
+
+/* ---------- presentación ---------- */
+function badgeClase(estado) {
+  if (estado === "open") return "open";
+  if (["processing", "revision", "paid"].includes(estado)) return estado;
+  if (estado === "completed") return "completed";
+  if (estado === "cancelled") return "cancelled";
+  return "";
+}
+function infoVendedor(u) {
+  if (!u) return "";
+  const p = [`@${esc(u.username || "N/A")}`];
+  if (u.rating_avg != null && u.rating_count) p.push(`⭐ ${Number(u.rating_avg).toFixed(2)} (${u.rating_count})`);
+  if (u._count && u._count.P2P != null) p.push(`✅ ${u._count.P2P} ops`);
+  if (u.kyc) p.push("🪪 KYC");
+  if (u.vip) p.push("💎 VIP");
+  return p.map(x => `<span class="chip">${x}</span>`).join("");
+}
+
+/* ---------- panel: ofertas seguidas ---------- */
+function renderSeguidas() {
+  const cont = document.getElementById("lista-seguidas");
+  if (!cfg.ofertas.length) {
+    cont.innerHTML = '<div class="empty">No sigues ninguna oferta. Agrégalas desde Mías o por UUID.</div>';
+    return;
+  }
+  cont.innerHTML = cfg.ofertas.map((s, i) => {
+    const o = cacheOfertas[s.uuid];
+    let estado = o ? o.status : (s.faltante ? "missing" : "?");
+    let badge = !s.activo && s.activo !== undefined ? "paused" : badgeClase(estado);
+    let etiqueta = s.activo === false ? "pausada" : (estado === "missing" ? "no existe" : estado);
+    const msg = s.mensaje ? esc(s.mensaje) : "(el que ya tiene en QvaPay)";
+    return `
+    <div class="card">
+      <div class="top"><strong>${i + 1}. ${esc(s.uuid.slice(0, 8))}…</strong><span class="badge ${badge}">${esc(etiqueta)}</span></div>
+      <div class="row"><span>Mensaje</span><b>${msg}</b></div>
+      <div class="btns">
+        <button onclick="togglePausa(${i})">${s.activo === false ? "▶ Reanudar" : "⏸ Pausar"}</button>
+        <button onclick="editarMensaje(${i})">✏️ Mensaje</button>
+        <button onclick="reactivarAhora(${i}, this)">🔄 Ahora</button>
+        <button onclick="quitarSeguida(${i})">🗑</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function seguir(uuid, mensaje) {
+  if (cfg.ofertas.some(s => s.uuid === uuid)) { toast("Ya la sigues", "err"); return false; }
+  cfg.ofertas.push({ uuid, mensaje: mensaje || cfg.mensajeGeneral || "", activo: true });
+  guardarCfg();
+  return true;
+}
+function agregarUuid() {
+  const u = document.getElementById("nuevo-uuid").value.trim();
+  if (!u) return;
+  if (seguir(u)) { document.getElementById("nuevo-uuid").value = ""; renderSeguidas(); toast("Oferta agregada", "ok"); }
+}
+function quitarSeguida(i) {
+  if (!confirm("¿Dejar de seguir esta oferta?")) return;
+  cfg.ofertas.splice(i, 1);
+  guardarCfg();
+  renderSeguidas();
+}
+function togglePausa(i) {
+  cfg.ofertas[i].activo = cfg.ofertas[i].activo === false ? true : false;
+  guardarCfg();
+  renderSeguidas();
+}
+function editarMensaje(i) {
+  const actual = cfg.ofertas[i].mensaje || "";
+  const nuevo = prompt("Mensaje para esta oferta (vacío = mantener el que tiene en QvaPay):", actual);
+  if (nuevo === null) return;
+  cfg.ofertas[i].mensaje = nuevo.trim().slice(0, 79);
+  guardarCfg();
+  renderSeguidas();
+}
+function aplicarMensajeGeneral() {
+  const m = document.getElementById("msg-general").value.trim().slice(0, 79);
+  cfg.mensajeGeneral = m;
+  cfg.ofertas.forEach(s => { s.mensaje = m; });
+  guardarCfg();
+  renderSeguidas();
+  toast("Mensaje aplicado a todas", "ok");
+}
+
+/* ---------- reactivar ---------- */
+async function editarOferta(s, o) {
+  const mensaje = s.mensaje ? s.mensaje : (o && o.message) || "";
+  await qvapay(`/p2p/${s.uuid}/edit`, { method: "POST", body: JSON.stringify({ message: mensaje }) });
+}
+async function reactivarAhora(i, btn) {
+  const s = cfg.ofertas[i];
+  btn.disabled = true;
+  try {
+    const datos = await qvapay("/p2p?my=true&take=100");
+    const o = ((datos && datos.data) || []).find(x => x.uuid === s.uuid);
+    if (!o) { toast("La oferta ya no existe", "err"); return; }
+    if (o.status !== "open") { toast("Estado actual: " + o.status + " (solo se reactivan las abiertas)", "err"); return; }
+    await editarOferta(s, o);
+    toast("Oferta reactivada", "ok");
+    log("Reactivada " + s.uuid.slice(0, 8));
+  } catch (e) {
+    toast("Error: " + e.message, "err");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ---------- ciclo (solo mientras la app está abierta) ---------- */
+let cicloActivo = false;
+let cicloTimer = null;
+let ejecutando = false;
+
+async function pasoCiclo() {
+  if (ejecutando) return;
+  ejecutando = true;
+  try {
+    const datos = await qvapay("/p2p?my=true&take=100");
+    const lista = (datos && datos.data) || [];
+    cacheOfertas = {};
+    lista.forEach(o => { cacheOfertas[o.uuid] = o; });
+
+    for (let i = 0; i < cfg.ofertas.length; i++) {
+      if (!cicloActivo) break;
+      const s = cfg.ofertas[i];
+      if (!s.uuid || s.activo === false) continue;
+      const corto = s.uuid.slice(0, 8);
+      const o = cacheOfertas[s.uuid];
+
+      if (!o) {
+        s.faltas = (s.faltas || 0) + 1;
+        if (s.faltas >= 2 && !s.faltante) {
+          s.faltante = true;
+          toast(`La oferta ${corto}… ya no existe`, "err");
+          log(`No existe ${corto}`);
+        }
+        continue;
+      }
+      s.faltas = 0;
+      s.faltante = false;
+
+      if (o.status === "completed") {
+        if (!s.completadoAvisado) { s.completadoAvisado = true; toast(`🎉 Oferta ${corto}… completada`, "ok"); log(`Completada ${corto}`); }
+        continue;
+      }
+      s.completadoAvisado = false;
+
+      if (o.status === "processing") {
+        if (s.ultimo !== "processing") {
+          toast(`⏳ Alguien aplicó a ${corto}…`, "ok");
+          log(`Peer aplicó a ${corto}`);
+          if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("warning");
+          if (cfg.saludo) {
+            try { await qvapay(`/p2p/${s.uuid}/chat`, { method: "POST", body: JSON.stringify({ message: cfg.saludo }) }); log("Saludo enviado"); }
+            catch (e) { log("No se pudo enviar saludo: " + e.message); }
+          }
+        }
+        s.ultimo = "processing";
+        continue;
+      }
+
+      if (o.status !== "open") { s.ultimo = o.status; continue; }
+
+      s.ultimo = "open";
+      try {
+        await editarOferta(s, o);
+        log("Reactivada " + corto);
+      } catch (e) {
+        log(`Error en ${corto}: ${e.message}`);
+        if (e.status === 429) toast("429: demasiadas peticiones", "err");
+      }
+      if (i < cfg.ofertas.length - 1) await sleep(cfg.pausa * 1000);
+    }
+    guardarCfg();
+    document.getElementById("txt-ultimo").textContent = new Date().toLocaleTimeString("es-ES", { hour12: false });
+    renderSeguidas();
+  } catch (e) {
+    log("Error de ciclo: " + e.message);
+    if (e.status === 403) detenerCiclo();
+  } finally {
+    ejecutando = false;
+  }
+}
+
+function programar() {
+  if (!cicloActivo) return;
+  cicloTimer = setTimeout(async () => { await pasoCiclo(); programar(); }, cfg.intervalo * 1000);
+}
+function pintarCiclo() {
+  document.getElementById("dot-ciclo").className = "dot" + (cicloActivo ? " on" : "");
+  document.getElementById("txt-ciclo").textContent = cicloActivo ? "Ciclo activo" : "Ciclo detenido";
+  const b = document.getElementById("btn-ciclo");
+  b.textContent = cicloActivo ? "⏹ Detener ciclo" : "▶ Iniciar ciclo";
+  b.className = "action" + (cicloActivo ? " danger" : "");
+}
+function iniciarCiclo() {
+  if (cicloActivo) return;
+  cicloActivo = true;
+  pintarCiclo();
+  log("Ciclo iniciado (cada " + cfg.intervalo + "s)");
+  pasoCiclo().then(programar);
+}
+function detenerCiclo() {
+  if (!cicloActivo) return;
+  cicloActivo = false;
+  clearTimeout(cicloTimer);
+  pintarCiclo();
+  log("Ciclo detenido");
+}
+function toggleCiclo() { cicloActivo ? detenerCiclo() : iniciarCiclo(); }
+
+/* ---------- mías ---------- */
+async function cargarMisOfertas() {
+  const cont = document.getElementById("lista-ofertas");
+  cont.innerHTML = '<div class="spinner">Cargando...</div>';
+  try {
+    const datos = await qvapay("/p2p?my=true&take=100");
+    const ofertas = (datos && datos.data) || [];
+    ofertas.forEach(o => { cacheOfertas[o.uuid] = o; });
+    document.getElementById("resumen-ofertas").textContent = ofertas.length + " oferta(s)";
+    if (!ofertas.length) { cont.innerHTML = '<div class="empty">No tienes ofertas todavía.</div>'; return; }
+    cont.innerHTML = ofertas.map(o => {
+      const peerHtml = o.Peer ? `<div class="row"><span>Peer</span><span>${infoVendedor(o.Peer)}</span></div>` : "";
+      const extras = [];
+      if (o.private) extras.push('<span class="chip">🔒 Privada</span>');
+      if (o.only_vip) extras.push('<span class="chip">💎 Solo VIP</span>');
+      const siguiendo = cfg.ofertas.some(s => s.uuid === o.uuid);
+      return `
+      <div class="card">
+        <div class="top"><strong>${o.type === "buy" ? "▼ Compra" : "▲ Venta"} ${esc(o.coin || "")}</strong><span class="badge ${badgeClase(o.status)}">${esc(o.status)}</span></div>
+        <div class="row"><span>Monto</span><b>${esc(o.amount)}</b></div>
+        <div class="row"><span>Recibe</span><b>${esc(o.receive)}</b></div>
+        ${peerHtml}
+        <div>${extras.join("")}</div>
+        <div class="btns">
+          ${siguiendo ? '<button disabled>✔ Siguiendo</button>' : `<button onclick="seguirDesdeMias('${o.uuid}')">＋ Seguir</button>`}
+          <button onclick="window.open('https://www.qvapay.com/p2p/${o.uuid}','_blank')">Gestionar →</button>
+        </div>
+      </div>`;
+    }).join("");
+  } catch (e) {
+    cont.innerHTML = '<div class="empty">Error: ' + esc(e.message) + '</div>';
+    toast(e.message, "err");
+  }
+}
+function seguirDesdeMias(uuid) {
+  const o = cacheOfertas[uuid];
+  if (seguir(uuid, "")) { toast("Siguiendo " + uuid.slice(0, 8) + "…", "ok"); cargarMisOfertas(); }
+}
+
+/* ---------- mercado ---------- */
+async function cargarMercado() {
+  const cont = document.getElementById("lista-mercado");
+  const coin = document.getElementById("m-coin").value.trim() || "BANK_CUP";
+  const min = document.getElementById("m-min").value;
+  const max = document.getElementById("m-max").value;
+  cont.innerHTML = '<div class="spinner">Cargando...</div>';
+  try {
+    let path = `/p2p?take=15&type=sell&coin=${encodeURIComponent(coin)}&orderBy=best_rate&orderType=desc`;
+    if (min) path += `&ratio_min=${encodeURIComponent(min)}`;
+    if (max) path += `&ratio_max=${encodeURIComponent(max)}`;
+    const datos = await qvapay(path);
+    const ofertas = (datos && datos.data) || [];
+    if (!ofertas.length) { cont.innerHTML = '<div class="empty">No hay ofertas disponibles ahora.</div>'; return; }
+    cont.innerHTML = ofertas.map(o => {
+      const ratio = (parseFloat(o.receive) / parseFloat(o.amount)) || 0;
+      return `
+      <div class="card">
+        <div class="top"><span class="badge open">${ratio.toFixed(2)}</span><a class="link" style="font-size:12px;" href="https://www.qvapay.com/p2p/${o.uuid}" target="_blank">Ver →</a></div>
+        <div>${infoVendedor(o.User)}</div>
+        <div class="row" style="margin-top:8px;"><span>Monto</span><b>${esc(o.amount)} QUSD</b></div>
+        <div class="row"><span>Recibes</span><b>${esc(o.receive)} ${esc(o.coin)}</b></div>
+        <button class="action" onclick="aplicarOferta('${o.uuid}', this)">Aplicar</button>
+      </div>`;
+    }).join("");
+  } catch (e) {
+    cont.innerHTML = '<div class="empty">Error: ' + esc(e.message) + '</div>';
+    toast(e.message, "err");
+  }
+}
+async function aplicarOferta(uuid, btn) {
+  if (!confirm("¿Aplicar a esta oferta?")) return;
+  btn.disabled = true;
+  btn.textContent = "Aplicando...";
+  try {
+    await qvapay("/p2p/" + uuid + "/apply", { method: "POST" });
+    toast("¡Oferta tomada!", "ok");
+    if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
+    cargarMercado();
+  } catch (e) {
+    toast("No se pudo aplicar: " + e.message, "err");
+    btn.disabled = false;
+    btn.textContent = "Aplicar";
+  }
+}
+
+/* ---------- crear ---------- */
+async function crearOferta() {
+  const body = {
+    type: document.getElementById("c-tipo").value,
+    coin: document.getElementById("c-coin").value.trim(),
+    amount: parseFloat(document.getElementById("c-amount").value),
+    receive: parseFloat(document.getElementById("c-receive").value),
+    details: [{ name: "cuenta", value: document.getElementById("c-cuenta").value.trim() || "-" }],
+    private: document.getElementById("c-privada").checked ? 1 : 0,
+    only_vip: document.getElementById("c-vip").checked ? 1 : 0,
+    message: document.getElementById("c-mensaje").value.trim(),
+  };
+  if (!body.amount || !body.receive) { toast("Completa monto y recibe", "err"); return; }
+  try {
+    const res = await qvapay("/p2p/create", { method: "POST", body: JSON.stringify(body) });
+    const uuid = res && res.p2p && res.p2p.uuid;
+    toast("¡Oferta creada!", "ok");
+    if (uuid && confirm("¿Quieres que la reactive automáticamente (seguirla)?")) seguir(uuid, body.message);
+    irA("main");
+  } catch (e) {
+    toast("Error creando oferta: " + e.message, "err");
+  }
+}
+
+/* ---------- arranque ---------- */
+(function init() {
+  if (!tg || !tg.initData) { document.getElementById("screen-lock").classList.add("active"); return; }
+  if (getToken()) {
+    document.getElementById("tabs").style.display = "flex";
+    irA("panel");
+  } else {
+    document.getElementById("screen-config").classList.add("active");
+  }
+})();
+</script>
+</body>
+</html>
