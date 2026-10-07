@@ -67,7 +67,7 @@
 
 <div id="screen-config" class="screen">
   <h1>🔑 Configura tu token</h1>
-  <p class="sub">Tu token de QvaPay. Se guarda solo en este dispositivo.</p>
+  <p class="sub">Tu token. Se guarda solo en este dispositivo.</p>
   <div class="card">
     <label>Token de API</label>
     <input type="text" id="input-token" placeholder="600689|xxxxxxxxxxxxxxxxx" />
@@ -238,7 +238,7 @@ async function cargarMisOfertas() {
   const cont = document.getElementById("lista-ofertas");
   cont.innerHTML = '<div class="spinner">Cargando...</div>';
   try {
-    const datos = await qvapay("/p2p?my=true&take=100");
+    const datos = await qvapay("/p2p?my=true&take=20");
     const ofertas = (datos && datos.data) || [];
     document.getElementById("resumen-ofertas").textContent = ofertas.length + " oferta(s)";
     if (ofertas.length === 0) {
